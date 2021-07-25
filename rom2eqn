@@ -16,6 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
+from dataclasses import dataclass
+import functools
+import sys
+from typing import Dict, List
+
 from qm import QuineMcCluskey
 
 
@@ -66,6 +71,55 @@ def decode_names(term, data_names):
     return ' and '.join(factors)
 
 
+@dataclass
+class HDL:
+    logic: List
+    addr_names: Dict[int, str]
+    data_names: Dict[int, str]
+
+
+class VHDL(HDL):
+    entity_name: str = 'rom'
+    architecture_name: str = 'rtl'
+        
+    def generate(self, outf = sys.stdout):
+        p = functools.partial(print, file = outf)
+        p('library ieee;')
+        p('use ieee.std_logic_1164.all;')
+        p();
+        p('entity %s is' % self.entity_name)
+        p('  port (');
+        for an in self.addr_names:
+            p('    %s: in  std_logic;' % self.addr_names[an]);
+        dn_list = [self.data_names[k] for k in sorted(self.data_names)]
+        for dn in dn_list:
+            if dn == dn_list[-1]:
+                p('    %s: out std_logic ' % dn);
+            else:
+                p('    %s: out std_logic;' % dn);
+        p('  );');
+        p('end entity %s;' % self.entity_name)
+        p()
+        p('architecture %s of %s is' % (self.architecture_name, self.entity_name))
+        p('begin')
+        p()
+        for bit_index in range(len(self.data_names)):
+            index = 0
+            for term in self.logic[bit_index]:
+                if index == 0:
+                    p('  %s <= ' % self.data_names[bit_index], end = '')
+                else:
+                    p((" " * (len(self.data_names[bit_index])+2)) + " or ", end = '')
+                index += 1
+                p('(' + decode_names(term, self.addr_names) + ')', end = '')
+                if index == len(self.data_names) - 1:
+                    p(';')
+                else:
+                    p()
+            p()
+        p('end architecture %s;' % self.architecture_name)
+
+        
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('devicefile',
@@ -77,50 +131,20 @@ def main():
     args = parser.parse_args()
 
     addr_names, data_names = parse_device_definition(args.devicefile)
-
-    data = args.datafile.read()
-    address_width = 10
-    data_width = 4
-
-    entity_name = 'foo';
-    architecture_name = 'rtl';
+    addr_width = len(addr_names)
+    data_width = len(data_names)
+    if False:
+        print(f'addr width = {addr_width}', file = sys.stderr)
+        print(f'data width = {data_width}', file = sys.stderr)
     
-    print('library ieee;')
-    print('use ieee.std_logic_1164.all;')
-    print();
-    print('entity %s is' % entity_name)
-    print('  port (');
-    for an in addr_names:
-        print('    %s: in  std_logic;' % addr_names[an]);
-    dn_list = [data_names[k] for k in sorted(data_names)]
-    for dn in dn_list:
-        if dn == dn_list[-1]:
-            print('    %s: out std_logic ' % dn);
-        else:
-            print('    %s: out std_logic;' % dn);
-    print('  );');
-    print('end entity %s;' % entity_name)
-    print()
-    print('architecture %s of %s is' % (architecture_name, entity_name))
-    print('begin')
-    print()
-    for bit_index in range(data_width):
-        sl = logic_minimize(data, bit_index)
-        index = 0
-        for term in sl:
-            if index == 0:
-                print('  %s <= ' % data_names[bit_index], end = '')
-            else:
-                print((" " * (len(data_names[bit_index])+2)) + " or ", end = '')
-            index += 1
-            print('(' + decode_names(term, addr_names) + ')', end = '')
-            if index == len(sl):
-                print(';')
-            else:
-                print()
-        print()
-    print('end architecture %s;' % architecture_name)
+    data = args.datafile.read()
 
+    logic = [logic_minimize(data, bit_index) for bit_index in range(data_width)]
+
+    vhdl = VHDL(logic,
+                addr_names,
+                data_names)
+    vhdl.generate()
 
 if __name__ == '__main__':
     main()
