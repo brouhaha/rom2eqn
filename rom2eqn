@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from abc import ABC, abstractmethod
 import argparse
 from dataclasses import dataclass
 import functools
@@ -72,18 +73,22 @@ def decode_names(term, data_names):
 
 
 @dataclass
-class HDL:
+class HDL(ABC):
     logic: List
     addr_names: Dict[int, str]
     data_names: Dict[int, str]
+
+    @abstractmethod
+    def generate(self, outfile = sys.stdout):
+        pass
 
 
 class VHDL(HDL):
     entity_name: str = 'rom'
     architecture_name: str = 'rtl'
         
-    def generate(self, outf = sys.stdout):
-        p = functools.partial(print, file = outf)
+    def generate(self, outfile = sys.stdout):
+        p = functools.partial(print, file = outfile)
         p('library ieee;')
         p('use ieee.std_logic_1164.all;')
         p();
@@ -128,6 +133,9 @@ def main():
     parser.add_argument('datafile',
                         type = argparse.FileType('rb'),
                         help = 'data file')
+    parser.add_argument('-o', '--outfile',
+                        type = argparse.FileType('w'),
+                        default = sys.stdout)
     args = parser.parse_args()
 
     addr_names, data_names = parse_device_definition(args.devicefile)
@@ -144,7 +152,7 @@ def main():
     vhdl = VHDL(logic,
                 addr_names,
                 data_names)
-    vhdl.generate()
+    vhdl.generate(outfile = args.outfile)
 
 if __name__ == '__main__':
     main()
