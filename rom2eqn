@@ -34,49 +34,67 @@ def logic_minimize(data, bit_index):
     return qm.simplify(ones = ones)
 
 
-def parse_device_definition(f):
-    addr_names = {}
-    data_names = {}
-    for l in f:
-        l = l.strip()
-        if not l:
-            continue
-        if l[0] == '#':
-            continue
-        t = l.split()
-        if (len(t) < 2):
-            raise Exception('syntax')
-        btype = t[0][0].lower()
-        bnum = int(t[0][1:])
-        if btype == 'a':
-            if bnum in addr_names:
-                raise Exception('duplicate address bit %d' % bnum)
-            addr_names[bnum] = t[1]
-        elif btype == 'd':
-            if bnum in data_names:
-                raise Exception('duplicate data bit %d' % bnum)
-            data_names[bnum] = t[1]
-    return addr_names, data_names
+class PortDef:
+    def __init__(self, infile, debug = False):
+        self.addr_names = {}
+        self.data_names = {}
+        for l in infile:
+            l = l.strip()
+            if not l:
+                continue
+            if l[0] == '#':
+                continue
+            t = l.split()
+            if (len(t) < 2):
+                raise Exception('syntax')
+            btype = t[0][0].lower()
+            bnum = int(t[0][1:])
+            if btype == 'a':
+                if bnum in self.addr_names:
+                    raise Exception(f'duplicate address bit {bnum}')
+                self.addr_names[bnum] = t[1]
+            elif btype == 'd':
+                if bnum in self.data_names:
+                    raise Exception(f'duplicate data bit {bnum}')
+                self.data_names[bnum] = t[1]
+        
+        if not self.contiguous_range_from_zero(self.addr_names.keys()):
+            raise Exception('address bits not contiguous from 0 to n-1')
+        if not self.contiguous_range_from_zero(self.data_names.keys()):
+            raise Exception('data bits not contiguous from 0 to n-1')
 
+        if debug:
+            print(f'addr width = {self.addr_width}', file = sys.stderr)
+            print('addr_names:')
+            for i in range(self.addr_width):
+                print(f'{i}: {self.addr_names[i]}')
+            print(f'data width = {self.data_width}', file = sys.stderr)
+            print('data_names:')
+            for i in range(self.data_width):
+                print(f'{i}: {self.data_names[i]}')
 
-def decode_names(term, data_names):
-    factors = []
-    for i in range(len(term)):
-        b = len(term) - 1 - i
-        if term[i] == '-':
-            continue
-        elif term[i] == '0':
-            factors.append('not %s' % data_names[b])
-        elif term[i] == '1':
-            factors.append(data_names[b])
-    return ' and '.join(factors)
+    @staticmethod
+    def contiguous_range_from_zero(l):
+        return sorted(l) == list(range(len(l)))
+
+    @property
+    def addr_width(self):
+        return len(self.addr_names)
+
+    @property
+    def data_width(self):
+        return len(self.data_names)
+
 
 
 @dataclass
 class HDL(ABC):
+    port_def: PortDef
     logic: List
-    addr_names: Dict[int, str]
-    data_names: Dict[int, str]
+
+    @abstractmethod
+    def _decode_names (self, term):
+        pass
 
     @abstractmethod
     def generate(self, outfile = sys.stdout):
@@ -87,42 +105,55 @@ class VHDL(HDL):
     entity_name: str = 'rom'
     architecture_name: str = 'rtl'
         
+    def _decode_names(self, term):
+        factors = []
+        for i in range(len(term)):
+            b = len(term) - 1 - i
+            if term[i] == '-':
+                continue
+            elif term[i] == '0':
+                factors.append(f'not {self.port_def.addr_names[b]}')
+            elif term[i] == '1':
+                factors.append(self.port_def.addr_names[b])
+        return ' and '.join(factors)
+
+
     def generate(self, outfile = sys.stdout):
         p = functools.partial(print, file = outfile)
         p('library ieee;')
         p('use ieee.std_logic_1164.all;')
         p();
-        p('entity %s is' % self.entity_name)
+        p(f'entity {self.entity_name} is')
         p('  port (');
-        for an in self.addr_names:
-            p('    %s: in  std_logic;' % self.addr_names[an]);
-        dn_list = [self.data_names[k] for k in sorted(self.data_names)]
+        for an in self.port_def.addr_names:
+            p(f'    {self.port_def.addr_names[an]}: in  std_logic;');
+        dn_list = [self.port_def.data_names[k] for k in sorted(self.port_def.data_names)]
         for dn in dn_list:
             if dn == dn_list[-1]:
-                p('    %s: out std_logic ' % dn);
+                p(f'    {dn}: out std_logic ');
             else:
-                p('    %s: out std_logic;' % dn);
+                p(f'    {dn}: out std_logic;');
         p('  );');
-        p('end entity %s;' % self.entity_name)
+        p(f'end entity {self.entity_name};')
         p()
-        p('architecture %s of %s is' % (self.architecture_name, self.entity_name))
+        p(f'architecture {self.architecture_name} of {self.entity_name} is')
         p('begin')
         p()
-        for bit_index in range(len(self.data_names)):
+        for bit_index in range(len(self.port_def.data_names)):
             index = 0
             for term in self.logic[bit_index]:
                 if index == 0:
-                    p('  %s <= ' % self.data_names[bit_index], end = '')
+                    p(f'  {self.port_def.data_names[bit_index]} <= ', end = '')
                 else:
-                    p((" " * (len(self.data_names[bit_index])+2)) + " or ", end = '')
+                    p((" " * (len(self.port_def.data_names[bit_index])+2)) + " or ", end = '')
                 index += 1
-                p('(' + decode_names(term, self.addr_names) + ')', end = '')
-                if index == len(self.data_names) - 1:
+                p('(' + self._decode_names(term) + ')', end = '')
+                if index == len(self.logic[bit_index]):
                     p(';')
                 else:
                     p()
             p()
-        p('end architecture %s;' % self.architecture_name)
+        p(f'end architecture {self.architecture_name};')
 
         
 def main():
@@ -138,20 +169,13 @@ def main():
                         default = sys.stdout)
     args = parser.parse_args()
 
-    addr_names, data_names = parse_device_definition(args.devicefile)
-    addr_width = len(addr_names)
-    data_width = len(data_names)
-    if False:
-        print(f'addr width = {addr_width}', file = sys.stderr)
-        print(f'data width = {data_width}', file = sys.stderr)
+    port_def = PortDef(args.devicefile)
     
     data = args.datafile.read()
 
-    logic = [logic_minimize(data, bit_index) for bit_index in range(data_width)]
+    logic = [logic_minimize(data, bit_index) for bit_index in range(port_def.data_width)]
 
-    vhdl = VHDL(logic,
-                addr_names,
-                data_names)
+    vhdl = VHDL(port_def, logic)
     vhdl.generate(outfile = args.outfile)
 
 if __name__ == '__main__':
