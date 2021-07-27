@@ -18,12 +18,25 @@
 from abc import ABC, abstractmethod
 import argparse
 from dataclasses import dataclass
+from enum import Enum
 import functools
 import sys
 from typing import Dict, List
 
 from qm import QuineMcCluskey
 
+
+class HDL_Language(Enum):
+    VHDL = 1
+    CUPL = 2
+
+    @staticmethod
+    def argparse(s):
+        try:
+            return HDL_Language[s.upper()]
+        except KeyError:
+            return s
+    
 
 def logic_minimize(data, bit_index):
     ones = []
@@ -156,6 +169,43 @@ class VHDL(HDL):
         p(f'end architecture {self.architecture_name};')
 
         
+class CUPL(HDL):
+    def _decode_names(self, term):
+        factors = []
+        for i in range(len(term)):
+            b = len(term) - 1 - i
+            if term[i] == '-':
+                continue
+            elif term[i] == '0':
+                factors.append(f'! {self.port_def.addr_names[b]}')
+            elif term[i] == '1':
+                factors.append(self.port_def.addr_names[b])
+        return ' & '.join(factors)
+
+
+    def generate(self, outfile = sys.stdout):
+        ''' Note: does not generate the CUPL file header or pin definitions '''
+        p = functools.partial(print, file = outfile)
+        for bit_index in range(len(self.port_def.data_names)):
+            index = 0
+            for term in self.logic[bit_index]:
+                if index == 0:
+                    p(f'{self.port_def.data_names[bit_index]} = ', end = '')
+                else:
+                    p((' ' * (len(self.port_def.data_names[bit_index])+1)) + "# ", end = '')
+                index += 1
+                p(self._decode_names(term), end = '')
+                if index == len(self.logic[bit_index]):
+                    p(';')
+                else:
+                    p()
+            p()
+
+
+hdl_classes = { HDL_Language.VHDL: VHDL,
+                HDL_Language.CUPL: CUPL }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('devicefile',
@@ -167,6 +217,12 @@ def main():
     parser.add_argument('-o', '--outfile',
                         type = argparse.FileType('w'),
                         default = sys.stdout)
+    parser.add_argument('-l', '--language',
+                        type = HDL_Language.argparse,
+                        choices = list(HDL_Language),
+                        default = HDL_Language.VHDL)
+                        
+                        
     args = parser.parse_args()
 
     port_def = PortDef(args.devicefile)
@@ -175,8 +231,8 @@ def main():
 
     logic = [logic_minimize(data, bit_index) for bit_index in range(port_def.data_width)]
 
-    vhdl = VHDL(port_def, logic)
-    vhdl.generate(outfile = args.outfile)
+    hdl = hdl_classes[args.language](port_def, logic)
+    hdl.generate(outfile = args.outfile)
 
 if __name__ == '__main__':
     main()
