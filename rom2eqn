@@ -18,25 +18,13 @@
 from abc import ABC, abstractmethod
 import argparse
 from dataclasses import dataclass
-from enum import Enum
+import enum
 import functools
 import sys
 from typing import Dict, List
 
 from qm import QuineMcCluskey
 
-
-class HDL_Language(Enum):
-    VHDL = 1
-    CUPL = 2
-
-    @staticmethod
-    def argparse(s):
-        try:
-            return HDL_Language[s.upper()]
-        except KeyError:
-            return s
-    
 
 def logic_minimize(data, bit_index):
     ones = []
@@ -202,8 +190,16 @@ class CUPL(HDL):
             p()
 
 
-hdl_classes = { HDL_Language.VHDL: VHDL,
-                HDL_Language.CUPL: CUPL }
+class HDL_Language(enum.Enum):
+    VHDL = VHDL
+    CUPL = CUPL
+
+    @staticmethod
+    def argparse(s):
+        try:
+            return HDL_Language[s.upper()]
+        except KeyError:
+            return s
 
 
 def main():
@@ -231,7 +227,7 @@ def main():
 
     logic = [logic_minimize(data, bit_index) for bit_index in range(port_def.data_width)]
 
-    hdl = hdl_classes[args.language](port_def, logic)
+    hdl = args.language.value(port_def, logic)
     hdl.generate(outfile = args.outfile)
 
 if __name__ == '__main__':
