@@ -26,6 +26,10 @@ from typing import Dict, List
 from qm import QuineMcCluskey
 
 
+def is_power_of_two(n):
+    return (n & (n-1)) == 0
+
+
 def logic_minimize(data, bit_index):
     ones = []
     for addr in range(len(data)):
@@ -35,11 +39,41 @@ def logic_minimize(data, bit_index):
     return qm.simplify(ones = ones)
 
 
-class PortDef:
-    def __init__(self, infile, debug = False):
+class SymDefs:
+    def __init__(self,
+                 infile,
+                 data_file_len,
+                 addr_bits,
+                 data_bits,
+                 debug = False):
         self.addr_names = {}
         self.data_names = {}
-        for l in infile:
+        if infile:
+            self._parse_file(infile, data_file_len, addr_bits, data_bits)
+        else:
+            self._generate_symbols(data_file_len, addr_bits, data_bits)
+
+        expected_file_length = (1 << self.addr_bits) * self.data_bytes
+        if data_file_len != expected_file_length:
+            raise Exception(f'File length {data_file_len} bytes does not match expected length {expected_file_length}')
+
+        if debug:
+            print(f'addr bits = {self.addr_bits}', file = sys.stderr)
+            print('addr_names:')
+            for i in range(self.addr_bits):
+                print(f'{i}: {self.addr_names[i]}')
+            print(f'data bits = {self.data_bits}', file = sys.stderr)
+            print('data_names:')
+            for i in range(self.data_bits):
+                print(f'{i}: {self.data_names[i]}')
+            
+
+    def _parse_file(self,
+                    symfile,
+                    data_file_len,
+                    addr_bits,
+                    data_bits):
+        for l in symfile:
             l = l.strip()
             if not l:
                 continue
@@ -64,33 +98,55 @@ class PortDef:
         if not self.contiguous_range_from_zero(self.data_names.keys()):
             raise Exception('data bits not contiguous from 0 to n-1')
 
-        if debug:
-            print(f'addr width = {self.addr_width}', file = sys.stderr)
-            print('addr_names:')
-            for i in range(self.addr_width):
-                print(f'{i}: {self.addr_names[i]}')
-            print(f'data width = {self.data_width}', file = sys.stderr)
-            print('data_names:')
-            for i in range(self.data_width):
-                print(f'{i}: {self.data_names[i]}')
+        if addr_bits and (addr_bits != self.addr_bits):
+            raise Exception(f'{self.addr_bits} address bits defined, does not match {addr_bits} specified.')
+        if data_bits and (data_bits != self.data_bits):
+            raise Exception(f'{self.data_bits} data bits defined, does not match {data_bits} specified.')
+
+    def _generate_symbols(self,
+                          data_file_len,
+                          addr_bits,
+                          data_bits):
+        if data_bits is None:
+            data_bits = 8  # arbitrary default
+        self.data_names = [f'D{i}' for i in range(data_bits)]
+
+        if addr_bits is None:
+            addr_bits = self._compute_address_bits_from_file_length(data_file_len)
+        self.addr_names = [f'A{i}' for i in range(addr_bits)]
+
+    def _compute_address_bits_from_file_length(self, data_file_len):
+        if data_file_len % self.data_bytes != 0:
+            raise Exception(f'file size {data_file_len} is not a multiple of data width rounded up to bytes {self.data_bytes}.')
+        words = data_file_len // self.data_bytes
+        if not is_power_of_two(words):
+            raise exception(f'file size {data_file_len} is not a power of two multiple of data with rounded up to bytes {self.data_bytes}')
+        return words.bit_length() - 1
+
 
     @staticmethod
     def contiguous_range_from_zero(l):
         return sorted(l) == list(range(len(l)))
 
     @property
-    def addr_width(self):
+    def addr_bits(self):
         return len(self.addr_names)
 
     @property
-    def data_width(self):
+    def data_bits(self):
         return len(self.data_names)
+
+    @property
+    def data_bytes(self):
+        """rounded up to full bytes"""
+        return (self.data_bits + 7) // 8
+        
 
 
 
 @dataclass
 class HDL(ABC):
-    port_def: PortDef
+    sym_defs: SymDefs
     logic: List
 
     @abstractmethod
@@ -113,9 +169,9 @@ class VHDL(HDL):
             if term[i] == '-':
                 continue
             elif term[i] == '0':
-                factors.append(f'not {self.port_def.addr_names[b]}')
+                factors.append(f'not {self.sym_defs.addr_names[b]}')
             elif term[i] == '1':
-                factors.append(self.port_def.addr_names[b])
+                factors.append(self.sym_defs.addr_names[b])
         return ' and '.join(factors)
 
 
@@ -126,9 +182,9 @@ class VHDL(HDL):
         p();
         p(f'entity {self.entity_name} is')
         p('  port (');
-        for an in self.port_def.addr_names:
-            p(f'    {self.port_def.addr_names[an]}: in  std_logic;');
-        dn_list = [self.port_def.data_names[k] for k in sorted(self.port_def.data_names)]
+        for an in self.sym_defs.addr_names:
+            p(f'    {self.sym_defs.addr_names[an]}: in  std_logic;');
+        dn_list = [self.sym_defs.data_names[k] for k in sorted(self.sym_defs.data_names)]
         for dn in dn_list:
             if dn == dn_list[-1]:
                 p(f'    {dn}: out std_logic ');
@@ -140,13 +196,13 @@ class VHDL(HDL):
         p(f'architecture {self.architecture_name} of {self.entity_name} is')
         p('begin')
         p()
-        for bit_index in range(len(self.port_def.data_names)):
+        for bit_index in range(len(self.sym_defs.data_names)):
             index = 0
             for term in self.logic[bit_index]:
                 if index == 0:
-                    p(f'  {self.port_def.data_names[bit_index]} <= ', end = '')
+                    p(f'  {self.sym_defs.data_names[bit_index]} <= ', end = '')
                 else:
-                    p((" " * (len(self.port_def.data_names[bit_index])+2)) + " or ", end = '')
+                    p((" " * (len(self.sym_defs.data_names[bit_index])+2)) + " or ", end = '')
                 index += 1
                 p('(' + self._decode_names(term) + ')', end = '')
                 if index == len(self.logic[bit_index]):
@@ -165,22 +221,22 @@ class CUPL(HDL):
             if term[i] == '-':
                 continue
             elif term[i] == '0':
-                factors.append(f'! {self.port_def.addr_names[b]}')
+                factors.append(f'! {self.sym_defs.addr_names[b]}')
             elif term[i] == '1':
-                factors.append(self.port_def.addr_names[b])
+                factors.append(self.sym_defs.addr_names[b])
         return ' & '.join(factors)
 
 
     def generate(self, outfile = sys.stdout):
         ''' Note: does not generate the CUPL file header or pin definitions '''
         p = functools.partial(print, file = outfile)
-        for bit_index in range(len(self.port_def.data_names)):
+        for bit_index in range(len(self.sym_defs.data_names)):
             index = 0
             for term in self.logic[bit_index]:
                 if index == 0:
-                    p(f'{self.port_def.data_names[bit_index]} = ', end = '')
+                    p(f'{self.sym_defs.data_names[bit_index]} = ', end = '')
                 else:
-                    p((' ' * (len(self.port_def.data_names[bit_index])+1)) + "# ", end = '')
+                    p((' ' * (len(self.sym_defs.data_names[bit_index])+1)) + "# ", end = '')
                 index += 1
                 p(self._decode_names(term), end = '')
                 if index == len(self.logic[bit_index]):
@@ -204,30 +260,42 @@ class HDL_Language(enum.Enum):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('devicefile',
+    parser.add_argument('-a', '--addrbits',
+                        type = int,
+                        help = 'ROM address width in bits')
+    parser.add_argument('-d', '--databits',
+                        type = int,
+                        help = 'ROM data width in bits')
+    parser.add_argument('-s', '--symfile',
                         type = argparse.FileType('r'),
-                        help = 'device definition file')
-    parser.add_argument('datafile',
-                        type = argparse.FileType('rb'),
-                        help = 'data file')
-    parser.add_argument('-o', '--outfile',
-                        type = argparse.FileType('w'),
-                        default = sys.stdout)
+                        help = 'symbol definition file')
     parser.add_argument('-l', '--language',
                         type = HDL_Language.argparse,
                         choices = list(HDL_Language),
-                        default = HDL_Language.VHDL)
+                        default = HDL_Language.VHDL,
+                        help = 'HDL for output')
+    parser.add_argument('-o', '--outfile',
+                        type = argparse.FileType('w'),
+                        default = sys.stdout)
+    parser.add_argument('datafile',
+                        type = argparse.FileType('rb'),
+                        help = 'data file')
                         
                         
     args = parser.parse_args()
 
-    port_def = PortDef(args.devicefile)
-    
     data = args.datafile.read()
+    if len(data) == 0:
+        raise Exception('Data file length is zero.')
 
-    logic = [logic_minimize(data, bit_index) for bit_index in range(port_def.data_width)]
+    sym_defs = SymDefs(args.symfile,
+                       len(data),
+                       args.addrbits,
+                       args.databits)
+    
+    logic = [logic_minimize(data, bit_index) for bit_index in range(sym_defs.data_bits)]
 
-    hdl = args.language.value(port_def, logic)
+    hdl = args.language.value(sym_defs, logic)
     hdl.generate(outfile = args.outfile)
 
 if __name__ == '__main__':
