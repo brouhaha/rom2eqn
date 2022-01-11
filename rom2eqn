@@ -109,11 +109,11 @@ class SymDefs:
                           data_bits):
         if data_bits is None:
             data_bits = 8  # arbitrary default
-        self.data_names = [f'D{i}' for i in range(data_bits)]
+        self.data_names = {i: f'D{i}' for i in range(data_bits)}
 
         if addr_bits is None:
             addr_bits = self._compute_address_bits_from_file_length(data_file_len)
-        self.addr_names = [f'A{i}' for i in range(addr_bits)]
+        self.addr_names = {i: f'A{i}' for i in range(addr_bits)}
 
     def _compute_address_bits_from_file_length(self, data_file_len):
         if data_file_len % self.data_bytes != 0:
@@ -182,9 +182,9 @@ class VHDL(HDL):
         p();
         p(f'entity {self.entity_name} is')
         p('  port (');
-        for an in self.sym_defs.addr_names:
+        for an in sorted(self.sym_defs.addr_names.keys()):
             p(f'    {self.sym_defs.addr_names[an]}: in  std_logic;');
-        dn_list = [self.sym_defs.data_names[k] for k in sorted(self.sym_defs.data_names)]
+        dn_list = [self.sym_defs.data_names[k] for k in sorted(self.sym_defs.data_names.keys())]
         for dn in dn_list:
             if dn == dn_list[-1]:
                 p(f'    {dn}: out std_logic ');
