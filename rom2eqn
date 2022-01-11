@@ -172,6 +172,8 @@ class VHDL(HDL):
                 factors.append(f'not {self.sym_defs.addr_names[b]}')
             elif term[i] == '1':
                 factors.append(self.sym_defs.addr_names[b])
+        if len(factors) == 0:
+            return "'0'";
         return ' and '.join(factors)
 
 
@@ -224,6 +226,8 @@ class CUPL(HDL):
                 factors.append(f'! {self.sym_defs.addr_names[b]}')
             elif term[i] == '1':
                 factors.append(self.sym_defs.addr_names[b])
+        if len(factors) == 0:
+            return "'b'0";
         return ' & '.join(factors)
 
 
