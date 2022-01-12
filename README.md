@@ -7,22 +7,23 @@ Hosted at the
 
 ROMs are sometimes used to implement logic functions. The rom2eqn program,
 written in Python 3, can convert a ROM binary image to logic equations in
-VHDL.
+VHDL or CUPL syntax.
 
 rom2eqn uses a Python implementation of the Quine McCluskey logic
-minimization algorithm by Thomas Pircher. The necessary file is included,
-but the upstream project is at https://github.com/tpircher/quine-mccluskey
+minimization algorithm by Thomas Pircher. The necessary source file is
+included; the upstream project is at
+https://github.com/tpircher/quine-mccluskey
 
 ## Usage
 
 Supposing that you have a binary file containing a 1Kx4 ROM image, named
 341-0061.bin, you can use the command:
 
-    rom2eqn -a 10 -d 4 -l cupl 341-0061.bin
+    rom2eqn -a 10 -d 4 -l cupl 341-0061.bin -o 341-0061.cupl
 
 to generate logic equations with generic signal names of inputs, A0 through A9,
-and outputs, D0 through D3, and write the equations in CUPL syntax to standard
-output.
+and outputs, D0 through D3, and write the equations in CUPL syntax to
+341-0061.cupl.
 
 A definitions file can be used to name the signal. The defintion file contains
 a series of lines, each of which has one default signal name (e.g. A3 or D2),
@@ -32,7 +33,9 @@ with a "#" are comments.
 If the definitions file name is 341-0061.def, then the command to generate the
 equations is:
 
-    rom2eqn -a 10 -d 4 -l cupl -d 341-0061.def 341-0061.bin
+    rom2eqn -a 10 -d 4 -l cupl -d 341-0061.def 341-0061.bin -o 341-0061.cupl
+
+If no -o option is specified, output will be to standard out.
 
 ## rom2eqn license
 
