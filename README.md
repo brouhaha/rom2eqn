@@ -16,6 +16,20 @@ https://github.com/tpircher/quine-mccluskey
 
 ## Usage
 
+The command format is:
+
+    rom2eqn [options] <romimage>
+
+Options are:
+
+    -a <bits>             number of ROM address bits (depth of ROM)
+    -d <bits>             number of ROM data bits (width of ROM)
+    -l <language>         language syntax to output, vhdl or cupl
+    -s <symbolfile>       symbol definition file
+    -o <outfile>          output file
+
+## Examples
+
 Supposing that you have a binary file containing a 1Kx4 ROM image, named
 341-0061.bin, you can use the command:
 
@@ -33,7 +47,7 @@ with a "#" are comments.
 If the definitions file name is 341-0061.def, then the command to generate the
 equations is:
 
-    rom2eqn -a 10 -d 4 -l cupl -d 341-0061.def 341-0061.bin -o 341-0061.cupl
+    rom2eqn -a 10 -d 4 -l cupl -s 341-0061.def 341-0061.bin -o 341-0061.cupl
 
 If no -o option is specified, output will be to standard out.
 
